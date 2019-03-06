@@ -1,0 +1,71 @@
+SparkR
+------------
+id=1:10000
+
+set.seed(10)
+price=sort(round((abs(rnorm(n = 10000, mean = 5000, sd = 4000))),2))
+df1 <- data.frame(id,price)
+write.csv(df1, file = "C:\\Users\\admin\\Desktop\\GfK\\Spark\\r-result1.csv",row.names=FALSE)
+
+ARBITARY_CONST = 50000
+sales=ARBITARY_CONST-id-ceiling(price)
+df2 <- data.frame(id,sales)
+write.csv(df2, file = "C:\\Users\\admin\\Desktop\\GfK\\Spark\\r-result2.csv",row.names=FALSE)
+
+#Misc commands
+#schema <- structType(structField("id", "integer"), structField("price", "double"))
+#m1 <- createDataFrame(as.data.frame(df1), schema = schema )
+#write.df(m1, "C:\\Users\\admin\\Desktop\\GfK\\Spark\\r-result1.csv",  source="com.databricks.spark.csv,"header="true"), mode=overwrite")
+
+#schema <- structType(structField("id", "integer"), structField("sales", "integer"))
+#m2 <- createDataFrame(as.data.frame(df2), schema = schema )
+#write.df(m2, "C:\\Users\\admin\\Desktop\\GfK\\Spark\\r-result2.csv",  source="csv")
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+pySpark
+-------------
+df1=spark.read.csv("C:\\Users\\admin\\Desktop\\GfK\\Spark\\r-result1.csv",header=True)
+df2=spark.read.csv("C:\\Users\\admin\\Desktop\\GfK\\Spark\\r-result2.csv",header=True)
+df3=df1.join(df2, df1.id == df2.id).drop(df2.id)
+df3.toPandas().to_csv("C:\\Users\\admin\\Desktop\\GfK\\Spark\\py-result.csv", header=True)
+#df3.write.csv("C:\\Users\\admin\\Desktop\\GfK\\Spark\\py-result.csv")
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+pyspark to calculate price elasticity(PED) & SalesRevenue
+---------------------------------------------------------------------------------
+
+#Using PySpark here due to maven build failures on my laptop for java programs. 
+
+from pyspark.sql import SQLContext
+from pyspark import SparkContext
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+
+
+sqlContext = SQLContext(sc)
+df = sqlContext.read.format('com.databricks.spark.csv').options(header='true', inferschema='true').load('C:\\Users\\admin\\Desktop\\GfK\\Spark\\py-result.csv')
+
+
+my_window = Window.partitionBy().orderBy("id")
+df = df.withColumn("prev_price", F.lag(df.price).over(my_window)) .withColumn("prev_sales", F.lag(df.sales).over(my_window))
+
+df = df.withColumn("PriceElasticty", ( (F.when(F.isnull(df.sales - df.prev_sales), 0).otherwise((df.prev_sales - df.sales)) )/ 
+			       ((df.sales + df.prev_sales)/2)) / 
+			      ( (F.when(F.isnull(df.price - df.prev_price), 0).otherwise(df.price - df.prev_price) )/ 
+			       ((df.price + df.prev_price)/2) )
+			      
+		)
+df = df.withColumn("SalesRevenue", (df.price*df.sales)   
+		)
+#Elastic moves
+df.filter(df['PriceElasticty'] > 1).show()
+df.filter(df['PriceElasticty'] > 1).count()
+
+#Average elasticity
+df.agg(F.avg(F.col("PriceElasticty"))).show()
+
+#Scenario when price and sales moved in the same direction
+df.filter(df['PriceElasticty'] < 0 ).show()
+
+df.toPandas().to_csv("C:\\Users\\admin\\Desktop\\GfK\\Spark\\final-result.csv", header=True)
